@@ -1,34 +1,8 @@
-
-
-
 /*************************************************** 
-  This is an example for the Adafruit CC3000 Wifi Breakout & Shield
-
-  Designed specifically to work with the Adafruit WiFi products:
-  ----> https://www.adafruit.com/products/1469
-
-  Adafruit invests time and resources providing this open source code, 
-  please support Adafruit and open-source hardware by purchasing 
-  products from Adafruit!
-
-  Written by Limor Fried & Kevin Townsend for Adafruit Industries.  
-  BSD license, all text above must be included in any redistribution
+  This is the stove monitor program. It initializes the CC3000 wifi module, connects the wifi
+  and starts up the temperature monitor.
  ****************************************************/
  
-/*
-This example does a test of the TCP client capability:
-  * Initialization
-  * Optional: SSID scan
-  * AP connection
-  * DHCP printout
-  * DNS lookup
-  * Optional: Ping
-  * Connect to website and print out webpage contents
-  * Disconnect
-SmartConfig is still beta and kind of works but is not fully vetted!
-It might not work on all networks!
-*/
-
 #include <Adafruit_CC3000.h>
 #include <ccspi.h>
 #include <SPI.h>
@@ -39,6 +13,16 @@ It might not work on all networks!
 
 #include "utility/debug.h"
 
+/* Include the dht11 library to make use of the temperature sensor. */
+
+#include <dht11.h>
+
+/*-----( Declare objects )-----*/
+dht11 DHT11;
+
+/*-----( Declare Constants, Pin Numbers )-----*/
+#define DHT11PIN 2
+
 // These are the interrupt and control pins
 #define ADAFRUIT_CC3000_IRQ   3  // MUST be an interrupt pin!
 // These can be any two pins
@@ -46,6 +30,7 @@ It might not work on all networks!
 #define ADAFRUIT_CC3000_CS    10
 // Use hardware SPI for the remaining pins
 // On an UNO, SCK = 13, MISO = 12, and MOSI = 11
+
 Adafruit_CC3000 cc3000 = Adafruit_CC3000(ADAFRUIT_CC3000_CS, ADAFRUIT_CC3000_IRQ, ADAFRUIT_CC3000_VBAT,
                                          SPI_CLOCK_DIVIDER); // you can change this clock speed
 Adafruit_CC3000_Client client;
@@ -53,7 +38,9 @@ Adafruit_CC3000_Client client;
                                          
 
 #define WLAN_SSID       "Disrupt"           // cannot be longer than 32 characters!
+
 #define WLAN_PASS       ""
+
 // Security can be WLAN_SEC_UNSEC, WLAN_SEC_WEP, WLAN_SEC_WPA or WLAN_SEC_WPA2
 #define WLAN_SECURITY   WLAN_SEC_WPA2
 
@@ -88,6 +75,15 @@ uint32_t lastChoreoRunTime = 0; // store the time of the last Choreo execution
 
 // led pin
 const int led_pin = 13;
+
+#define SMS_NOT_SENT    0
+#define SMS_SENT        1
+
+int sms_state = SMS_NOT_SENT;
+unsigned long sms_state_timer;
+
+// 1m timeout
+#define SMS_SENT_TIMEOUT  60000
 
 void setup(void)
 {
@@ -168,8 +164,8 @@ void setup(void)
 
 	// send a text message using Twilio via Temboo 
         
-        Serial.println("Attempting to send text to twilio");
-	runSendSMS();
+//        Serial.println("Attempting to send text to twilio");
+//	runSendSMS();
 
 
     www.fastrprint(F("GET "));
@@ -213,13 +209,54 @@ void setup(void)
   cc3000.disconnect();
   */
  
+  /* Indicate that the DH11 sensor is being activated, and the versions of the library being used */
+  Serial.println("DHT11 TEST PROGRAM ");
+  Serial.print("LIBRARY VERSION: ");
+  Serial.println(DHT11LIB_VERSION);
+  Serial.println();
+ 
 }
 
 void loop(void) {
-  digitalWrite(led_pin, HIGH);
-  delay(1000);
-  digitalWrite(led_pin, LOW);
-  delay(1000);
+  
+  Serial.println("\n");
+
+  int chk = DHT11.read(DHT11PIN);
+  
+  Serial.print("Read sensor: ");
+  switch (chk)
+  {
+    case 0: Serial.println("OK"); break;
+    case -1: Serial.println("Checksum error"); break;
+    case -2: Serial.println("Time out error"); break;
+    default: Serial.println("Unknown error"); break;
+  }
+ 
+  Serial.print("Temperature (oC): ");
+  Serial.println((float)DHT11.temperature, 2);
+
+  Serial.print("Temperature (oF): ");
+  Serial.println(Fahrenheit(DHT11.temperature), 2);
+
+  Serial.print("Temperature (K): ");
+  Serial.println(Kelvin(DHT11.temperature), 2); 
+
+   if (DHT11.temperature >= 45) {
+      Serial.println("Now here is where we'd push out an sms to the phone that the stove is on.");
+    
+      if( sms_state == SMS_NOT_SENT ) {
+          runSendSMS();
+          sms_state = SMS_SENT;
+          sms_state_timer = millis();
+      }
+   }
+ 
+  delay(2000);
+
+  if( sms_state == SMS_SENT )
+      if( millis() - sms_state_timer > SMS_SENT_TIMEOUT )
+          sms_state = SMS_NOT_SENT;
+  
 }
 
 //void loop(void)
@@ -245,7 +282,7 @@ void runSendSMS() {
   // Set Choreo inputs
   String AuthTokenValue = "ffc7c1a48023818440037303e7c2d038";
   SendSMSChoreo.addInput("AuthToken", AuthTokenValue);
-  String BodyValue = "Hello from temboo";
+  String BodyValue = "The stove is on!!!";
   SendSMSChoreo.addInput("Body", BodyValue);
   String ToValue = "+19179755336";
   SendSMSChoreo.addInput("To", ToValue);
@@ -346,4 +383,18 @@ bool displayConnectionDetails(void)
     Serial.println();
     return true;
   }
+}
+
+/*-----( Declare User-written Functions )-----*/
+//
+//Celsius to Fahrenheit conversion
+double Fahrenheit(double celsius)
+{
+	return 1.8 * celsius + 32;
+}
+
+//Celsius to Kelvin conversion
+double Kelvin(double celsius)
+{
+	return celsius + 273.15;
 }
